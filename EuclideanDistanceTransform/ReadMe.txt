@@ -1,0 +1,1 @@
+This is a C++/OpenCV application for euclidean distance transform computation based on the paper "Parallel Banding Algorithm to Compute Exact Distance Transform with the GPU" written by Cao et al. in 2010.
