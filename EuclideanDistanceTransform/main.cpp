@@ -1,6 +1,7 @@
 #include <opencv2\opencv.hpp>
 #include <iostream>
 #include <time.h>
+#include "EDT.h"
 
 double cpu_time(void)
 {
@@ -27,16 +28,17 @@ float computeEuclideanDistance(int sitePixel, int pixel, int imageCols) {
 	return sqrtf(powf(sx - px, 2) + powf(sy - py, 2));
 
 }
+
 bool hasDomination(int a, int b, int c, int column, int imageCols) {
 
-	int u, v;
+	float u, v;
 	//p(i, u)
 	int ax = a % imageCols;
 	int ay = a / imageCols;
 	int bx = b % imageCols;
 	int by = b / imageCols;
-	int mx = (ax + bx) / 2;
-	int my = (ay + by) / 2;
+	float mx = (float)(ax + bx) / 2;
+	float my = (float)(ay + by) / 2;
 	if(bx == ax) {
 		u = my;
 	} else if(by == ay) {
@@ -50,8 +52,8 @@ bool hasDomination(int a, int b, int c, int column, int imageCols) {
 	//q(i, v)
 	int cx = c % imageCols;
 	int cy = c / imageCols;
-	mx = (bx + cx) / 2;
-	my = (by + cy) / 2;
+	mx = (float)(bx + cx) / 2;
+	my = (float)(by + cy) / 2;
 	if(cx == bx) {
 		v = my;
 	} else if(cy == by) {
@@ -109,7 +111,7 @@ void computeNearestSiteInRow(cv::Mat image, int *nearestSite) {
 				for(int xs = x - 1; xs >= 0; xs--) {
 					
 					int propagationPixel = y * image.cols + xs;
-					if(image.ptr<unsigned char>()[propagationPixel] != 0 && nearestSite[propagationPixel] == -1) {
+					if(nearestSite[propagationPixel] == -1) {
 						nearestSite[propagationPixel] = sitePixel;
 					} else if(image.ptr<unsigned char>()[propagationPixel] != 0 && nearestSite[propagationPixel] != -1) {
 						float previousEuclideanDistance = computeEuclideanDistance(nearestSite[propagationPixel], propagationPixel, image.cols);
@@ -206,11 +208,10 @@ void computeDistanceTransform(cv::Mat EDTImage, int *nearestSite, int imageRows,
 int main(int argc, char **argv) {
 	
 	cv::Mat image = cv::imread(argv[1], CV_LOAD_IMAGE_GRAYSCALE);
-	cv::Mat sites = cv::Mat(image.rows, image.cols, image.type());
 	cv::Mat EDTImage = cv::Mat(image.rows, image.cols, image.type());
 	int *nearestSite = (int*)malloc(image.rows * image.cols * sizeof(int));
 	int *proximateSites = (int*)malloc(image.rows * image.cols * sizeof(int));
-
+	
 	double begin = cpu_time();
 	clearStructure(nearestSite, image.rows * image.cols);
 	clearStructure(proximateSites, image.rows * image.cols);
@@ -219,13 +220,36 @@ int main(int argc, char **argv) {
 	computeNearestSiteInFull(proximateSites, nearestSite, image.rows, image.cols);
 	computeDistanceTransform(EDTImage, nearestSite, image.rows, image.cols);
 	double end = cpu_time();
-	printf("%f ms\n", (end - begin) * 1000);
+	printf("CPU: %f ms\n", (end - begin) * 1000);
 	
+	unsigned char *GPUImage, *GPUEDTImage;
+	int *GPUNearestSite, *GPUProximateSites;
+	cudaMalloc(&GPUImage, image.rows * image.cols * sizeof(unsigned char));
+	cudaMalloc(&GPUEDTImage, image.rows * image.cols * sizeof(unsigned char));
+	cudaMalloc(&GPUNearestSite, image.rows * image.cols * sizeof(int));
+	cudaMalloc(&GPUProximateSites, image.rows * image.cols * sizeof(int));
+
+	begin = cpu_time();
+	cudaMemcpy(GPUImage, image.ptr<unsigned char>(), image.rows * image.cols * sizeof(unsigned char), cudaMemcpyHostToDevice);
+	GPUClearStructure(GPUNearestSite, image.rows, image.cols);
+	GPUClearStructure(GPUProximateSites, image.rows, image.cols);
+	GPUComputeNearestSiteInRow(GPUImage, GPUNearestSite, image.rows, image.cols);
+	GPUComputeProximateSitesInColumn(GPUNearestSite, GPUProximateSites, image.rows, image.cols);
+	GPUComputeNearestSiteInFull(GPUProximateSites, GPUNearestSite, image.rows, image.cols);
+	GPUComputeDistanceTransform(GPUEDTImage, GPUNearestSite, image.rows, image.cols);
+	cudaMemcpy(EDTImage.ptr<unsigned char>(), GPUEDTImage, image.rows * image.cols * sizeof(unsigned char), cudaMemcpyDeviceToHost);
+	end = cpu_time();
+	printf("GPU: %f ms\n", (end - begin) * 1000);
+
 	while(cv::waitKey(33) != 13) {
 		cv::imshow("Original Image", image);
 		cv::imshow("EDT Image", EDTImage);
 	}
 
+	cudaFree(GPUImage);
+	cudaFree(GPUEDTImage);
+	cudaFree(GPUNearestSite);
+	cudaFree(GPUProximateSites);
 	delete [] nearestSite;
 	delete [] proximateSites;
 	return 0;
