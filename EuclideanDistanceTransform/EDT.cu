@@ -135,8 +135,6 @@ __global__ void updateBandSitesInRow(int *nearestSite, int cols, int bandSize, i
 __global__ void updateNearestSiteInRow(int *nearestSite, int cols, int bandSize) {
 	
 	int pixel = blockIdx.x * blockDim.x + threadIdx.x;
-	if(pixel % bandSize == 0 || pixel % (bandSize - 1) == 0) return;
-
 	int x = pixel % cols;
 	int y = pixel / cols;
 	int band = x / bandSize;
